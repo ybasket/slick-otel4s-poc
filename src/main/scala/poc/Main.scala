@@ -36,7 +36,18 @@ object Main extends IOApp.Simple {
               case _ => None
             }
 
-            val kind = action.getClass.getSimpleName
+            // Anonymous Slick action subclasses (notably the `StatementInvoker`
+            // built by `sql"...".as[T]`) have an empty `getSimpleName`. The
+            // `getSuperclass` is `Object` since their concrete supertypes are
+            // mixed-in traits, so look at the action's type instead.
+            val kind = {
+              val s = action.getClass.getSimpleName
+              if (s.nonEmpty) s
+              else action match {
+                case _: SqlAction[_, _, _] => "SqlAction"
+                case _                     => action.getClass.getName
+              }
+            }
 
             maybeName match {
               case Some(name) =>
@@ -97,6 +108,26 @@ object Main extends IOApp.Simple {
               now <- db.run(sql"SELECT NOW()".as[String].head.named("select-now"))
               answer <- db.run(sql"SELECT 41 + 1".as[Int].head.named("select-answer"))
               _ <- IO.println(s"NOW = $now, answer = $answer")
+
+              // A streaming DBIOAction backed by a recursive CTE. Each row
+              // calls SLEEP(0.4) server-side so the whole stream takes ~2s,
+              // which makes the wrapping `slick.dbio` span easy to spot in
+              // Tempo / any trace viewer.
+              slowStream =
+                sql"""
+                  WITH RECURSIVE seq(n) AS (
+                    SELECT 1
+                    UNION ALL
+                    SELECT n + 1 FROM seq WHERE n < 5
+                  )
+                  SELECT CONCAT('row-', n, ' (server slept 0.4s, returned ', SLEEP(0.4), ')') FROM seq
+                """.as[String]
+              _ <- IO.println("Streaming slow rows (each row server-sleeps 0.4s)...")
+              _ <- db
+                     .stream(slowStream)
+                     .evalTap(row => IO.println(s"  $row"))
+                     .compile
+                     .drain
             } yield ()
           )
         }
