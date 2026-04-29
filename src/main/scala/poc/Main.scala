@@ -10,10 +10,10 @@ import slick.basic.ActionListener
 import slick.cats.Database
 import slick.dbio.{DBIOAction, NamedAction}
 import slick.jdbc.{DatabaseConfig, MySQLProfile}
-import slick.jdbc.MySQLProfile.api.*
+import slick.jdbc.MySQLProfile.api._
 import slick.sql.SqlAction
 
-object Main extends IOApp.Simple:
+object Main extends IOApp.Simple {
 
   /** Wraps every executed `DBIOAction` node in an otel span. Implementation
     * mirrors the snippet in the PR #3544 description: pull a useful name from
@@ -26,16 +26,17 @@ object Main extends IOApp.Simple:
       .withDescription("Number of Slick DBIO nodes executed.")
       .create
       .map { counter =>
-        new ActionListener[IO]:
-          override def around[R, H](action: DBIOAction[R, ?, ?], exec: IO[H]): IO[H] =
-            val maybeName = action match
-              case sql: SqlAction[?, ?, ?] => Option(sql.getDumpInfo.mainInfo).filter(_.nonEmpty)
+        new ActionListener[IO] {
+          override def around[R, H](action: DBIOAction[R, _, _], exec: IO[H]): IO[H] = {
+            val maybeName = action match {
+              case sql: SqlAction[_, _, _] => Option(sql.getDumpInfo.mainInfo).filter(_.nonEmpty)
               case NamedAction(_, name)    => Some(name)
               case _                       => None
+            }
 
             val kind = action.getClass.getSimpleName
 
-            maybeName match
+            maybeName match {
               case Some(name) =>
                 tracer
                   .spanBuilder("slick.dbio")
@@ -46,13 +47,16 @@ object Main extends IOApp.Simple:
                   .productL(counter.inc(Attribute("action.kind", kind)))
               case None =>
                 exec.productL(counter.inc(Attribute("action.kind", kind)))
+            }
+          }
+        }
       }
 
   /** Open a MySQL-backed Slick database whose interpreter is instrumented by
     * `listener`. Uses the "advanced opening path" introduced in PR #3544:
     * `Database.fromCore(makeDatabase(config, listener))`.
     */
-  private def databaseResource(listener: ActionListener[IO]): Resource[IO, Database] =
+  private def databaseResource(listener: ActionListener[IO]): Resource[IO, Database] = {
     val cfg = ConfigFactory.parseString(
       """
         |mydb {
@@ -79,23 +83,23 @@ object Main extends IOApp.Simple:
         .makeDatabase[IO](dc, listener)
         .map(Database.fromCore)
     )(db => IO.blocking(db.close()).attempt.void)
+  }
 
   override def run: IO[Unit] =
     OtelJava.autoConfigured[IO]().use { otel =>
-      for
+      for {
         tracer   <- otel.tracerProvider.get("slick-otel4s-poc")
         meter    <- otel.meterProvider.get("slick-otel4s-poc")
         listener <- otelListener(tracer, meter)
         _        <- databaseResource(listener).use { db =>
           tracer.span("poc.workflow").surround(
-            for
+            for {
               now    <- db.run(sql"SELECT NOW()".as[String].head.named("select-now"))
               answer <- db.run(sql"SELECT 41 + 1".as[Int].head.named("select-answer"))
               _      <- IO.println(s"NOW = $now, answer = $answer")
-            yield ()
+            } yield ()
           )
         }
-      yield ()
+      } yield ()
     }
-
-end Main
+}

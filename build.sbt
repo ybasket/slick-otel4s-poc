@@ -4,12 +4,10 @@
 // https://github.com/hvesalai/slick.git on branch slick4-tracing,
 // which adds the ActionListener[F[_]] hook used in this PoC.
 //
-// NOTE: the slick4 branch cross-compiles for Scala 2.12 / 2.13 / 3.8.3 and
-// defaults to 2.13. Build/run with `sbt ++3.8.3 ...` (or `set ThisBuild /
-// scalaVersion := "3.8.3"` in the slick subbuild) so the source dep matches
-// our Scala 3 setting. Aliases `compile` and `run` below take care of that.
+// 2.13.18 is the slick4 branch's default scalaVersion, so no `++` is needed
+// when building this project.
 
-ThisBuild / scalaVersion := "3.8.3"
+ThisBuild / scalaVersion := "2.13.18"
 
 lazy val slickGit       = uri("https://github.com/hvesalai/slick.git#slick4-tracing")
 lazy val slickRef       = ProjectRef(slickGit, "slick")
