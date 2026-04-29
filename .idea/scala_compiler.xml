@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ScalaCompilerConfiguration">
+    <option name="separateProdTestSources" value="true" />
+    <profile name="sbt 1" modules="slick-otel4s-poc,slick-otel4s-poc.main,slick-otel4s-poc.test" />
+  </component>
+</project>
