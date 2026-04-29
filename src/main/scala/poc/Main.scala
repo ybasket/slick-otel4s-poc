@@ -78,11 +78,9 @@ object Main extends IOApp.Simple {
     )
     val dc = DatabaseConfig.forConfig[MySQLProfile]("mydb", cfg)
 
-    Resource.make(
-      dc.profile.backend
-        .makeDatabase[IO](dc, listener)
-        .map(Database.fromCore)
-    )(db => IO.blocking(db.close()).attempt.void)
+    Resource.fromAutoCloseable(
+      dc.profile.backend.makeDatabase[IO](dc, listener).map(Database.fromCore)
+    )
   }
 
   override def run: IO[Unit] =
