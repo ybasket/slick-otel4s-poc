@@ -1,0 +1,35 @@
+# Local backend for the PoC.
+#
+#   docker compose up -d        # start MySQL + Grafana OTel-LGTM
+#   sbt run                     # run the app against them
+#   open http://localhost:3000  # Grafana → Tempo for traces, Mimir for metrics
+#   docker compose down         # tear everything down
+#
+# Ports match the defaults in build.sbt and Main.scala (3306 / 4317 / 4318 /
+# 3000), so no app-side configuration is needed.
+
+services:
+  mysql:
+    image: mysql:8.0.44
+    container_name: slick-otel4s-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "127.0.0.1:3306:3306"
+    # No volume on purpose: the PoC issues only ad-hoc SELECTs and benefits
+    # from a fresh, ephemeral DB on every `up`.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  otel-lgtm:
+    # Grafana's "all-in-one" image: OTel collector + Loki + Grafana + Tempo +
+    # Mimir + Pyroscope, with a preconfigured Grafana data source for each.
+    image: grafana/otel-lgtm:latest
+    container_name: slick-otel4s-lgtm
+    ports:
+      - "127.0.0.1:4317:4317"  # OTLP/gRPC ingest (used by the app)
+      - "127.0.0.1:4318:4318"  # OTLP/HTTP ingest
+      - "127.0.0.1:3000:3000"  # Grafana UI (login: admin / admin)
