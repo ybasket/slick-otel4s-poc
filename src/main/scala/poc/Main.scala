@@ -45,7 +45,7 @@ object Main extends IOApp.Simple {
               if (s.nonEmpty) s
               else action match {
                 case _: SqlAction[_, _, _] => "SqlAction"
-                case _                     => action.getClass.getName
+                case _ => action.getClass.getName
               }
             }
 
@@ -124,10 +124,10 @@ object Main extends IOApp.Simple {
                 """.as[String]
               _ <- IO.println("Streaming slow rows (each row server-sleeps 0.4s)...")
               _ <- db
-                     .stream(slowStream)
-                     .evalTap(row => IO.println(s"  $row"))
-                     .compile
-                     .drain
+                .stream(slowStream)
+                .evalTap(row => tracer.span("Output row").surround(IO.println(s"  $row").andWait(0.01.seconds)))
+                .compile
+                .drain
             } yield ()
           )
         }
