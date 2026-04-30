@@ -83,6 +83,23 @@ object Main extends IOApp.Simple {
         |      databaseName = "mysql"
         |      user = "root"
         |      password = "root"
+        |      // Set Connector/J's classic row-by-row streaming mode as
+        |      // the connection-wide default. Slick's `withStatementParameters`
+        |      // would normally do this per-action, but that builds a
+        |      // `CleanUpAction` (via `andFinally(PopStatementParameters)`)
+        |      // which the slick4-tracing branch's `interpretStream` does
+        |      // not handle structurally — it falls into the generic
+        |      // `case other` branch and materializes the whole ResultSet
+        |      // through the non-streaming interpreter, defeating the demo.
+        |      // Setting this connection property bypasses that path:
+        |      // every `Statement` created on the connection inherits
+        |      // `fetchSize = Integer.MIN_VALUE` without us having to
+        |      // wrap the streaming action.
+        |      // For non-streaming queries (e.g. `.head`) Slick's
+        |      // `StatementInvoker` calls `setFetchSize(1)` explicitly,
+        |      // overriding this default — so SELECT NOW() etc. are
+        |      // unaffected.
+        |      defaultFetchSize = "-2147483648"
         |    }
         |    maxConnections = 4
         |  }
@@ -109,23 +126,50 @@ object Main extends IOApp.Simple {
               answer <- db.run(sql"SELECT 41 + 1".as[Int].head.named("select-answer"))
               _ <- IO.println(s"NOW = $now, answer = $answer")
 
-              // A streaming DBIOAction backed by a recursive CTE. Each row
-              // calls SLEEP(0.4) server-side so the whole stream takes ~2s,
-              // which makes the wrapping `slick.dbio` span easy to spot in
-              // Tempo / any trace viewer.
+              // A streaming DBIOAction over a real (non-derived) table that
+              // calls SLEEP(0.4) per row in the projection, so each row
+              // takes ~400ms server-side. Reading from a base table
+              // (rather than a CTE or derived table) is important: MySQL
+              // materializes recursive CTEs into a temporary table before
+              // streaming, which makes all SLEEPs happen up front and
+              // defeats the demo.
+              //
+              // One subtlety: even with classic streaming, MySQL *server*
+              // batches small rows into its network output buffer
+              // (`net_buffer_length`, default 16 KiB but typically tuned
+              // higher) before flushing. That makes small-row demos look
+              // buffered even when the JDBC side is streaming. Padding
+              // each row to ~64 KiB forces the server to flush per row,
+              // which is what makes the per-row timings visible below.
+              //
+              // Note: we deliberately do *not* call
+              // `.withStatementParameters(fetchSize = ...)` here — see
+              // the comment on `defaultFetchSize` in the DataSource
+              // properties above. Connection-level streaming is set up
+              // there instead.
               slowStream =
                 sql"""
-                  WITH RECURSIVE seq(n) AS (
-                    SELECT 1
-                    UNION ALL
-                    SELECT n + 1 FROM seq WHERE n < 5
+                  SELECT CONCAT(
+                    'row-', help_topic_id,
+                    ' (server slept 0.4s, returned ', SLEEP(0.4), ') ',
+                    REPEAT('.', 65000)
                   )
-                  SELECT CONCAT('row-', n, ' (server slept 0.4s, returned ', SLEEP(0.4), ')') FROM seq
+                  FROM mysql.help_topic
+                  LIMIT 5
                 """.as[String]
               _ <- IO.println("Streaming slow rows (each row server-sleeps 0.4s)...")
+              start <- IO.monotonic
               _ <- db
                 .stream(slowStream)
-                .evalTap(row => tracer.span("Output row").surround(IO.println(s"  $row").andWait(0.01.seconds)))
+                .evalTap { row =>
+                  IO.monotonic.flatMap { nowT =>
+                    val prefix = row.take(60)
+                    tracer.span("Output row").surround(
+                      IO.println(f"  [+${(nowT - start).toMillis}%4dms] $prefix... (${row.length} bytes)")
+                        .andWait(0.01.seconds)
+                    )
+                  }
+                }
                 .compile
                 .drain
             } yield ()

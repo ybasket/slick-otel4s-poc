@@ -1,0 +1,19 @@
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %logger{20} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="STDOUT" />
+  </root>
+
+  <!-- Quiet a couple of chatty libs so the demo output is readable. -->
+  <logger name="com.zaxxer.hikari" level="WARN" />
+
+  <!-- Bump these to DEBUG to see Slick's prepareStatement / setFetchSize /
+       result-set traces (useful when debugging streaming behaviour):
+         <logger name="slick.jdbc.JdbcBackend.statement" level="DEBUG" />
+         <logger name="slick.jdbc.JdbcBackend.benchmark" level="DEBUG" /> -->
+</configuration>
